@@ -10,6 +10,8 @@ import {
   LifeBuoy,
   LogOut,
   ChevronRight,
+  Database,
+  Terminal,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { Badge } from '@/components/ui/Badge';
@@ -37,6 +39,11 @@ const navItems = [
     icon: Users,
   },
   {
+    label: 'Explorador Datos',
+    path: '/explorador',
+    icon: Database,
+  },
+  {
     label: 'Parametrización',
     path: '/parametrizacion',
     icon: Sliders,
@@ -45,6 +52,11 @@ const navItems = [
     label: 'Auditoría',
     path: '/auditoria',
     icon: History,
+  },
+  {
+    label: 'Logs de Supabase',
+    path: '/logs',
+    icon: Terminal,
   },
   {
     label: 'Soporte Técnico',

@@ -97,6 +97,12 @@ serve(async (req: Request) => {
       organizacionId,
       telefono = null,
       motivo = 'Creación por Edge Function oficial',
+      dineroMaxCaja,
+      dineroMaxVenta,
+      dineroMaxGasto,
+      maxCuotas,
+      permiteBorrarVenta,
+      permiteModificarPagos,
     } = body;
 
     if (!email || !password || !nombre || !organizacionId) {
@@ -149,11 +155,13 @@ serve(async (req: Request) => {
       user_metadata: {
         nombre: nombre.trim(),
         apellido: (apellido || '').trim(),
+        telefono: telefono ? String(telefono).trim() : null,
         creado_por: callerUser.id,
       },
     });
 
     if (createAuthError || !newAuthData.user) {
+      console.error('Error creando usuario en Auth:', createAuthError?.message);
       return new Response(
         JSON.stringify({ error: createAuthError?.message || 'Error creando usuario en Supabase Auth' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -171,13 +179,12 @@ serve(async (req: Request) => {
       superior_id: null, // Administrador raíz de su organización
       organizacion_id: organizacionId,
       activo: true,
-      telefono: telefono ? String(telefono).trim() : null,
-      dinero_max_caja: 10000000,
-      dinero_max_venta: 5000000,
-      dinero_max_gasto: 2000000,
-      max_cuotas: 60,
-      permite_borrar_venta: true,
-      permite_modificar_pagos: true,
+      dinero_max_caja: Number(dineroMaxCaja) > 0 ? Number(dineroMaxCaja) : 10000000,
+      dinero_max_venta: Number(dineroMaxVenta) > 0 ? Number(dineroMaxVenta) : 5000000,
+      dinero_max_gasto: Number(dineroMaxGasto) > 0 ? Number(dineroMaxGasto) : 2000000,
+      max_cuotas: Number(maxCuotas) > 0 ? Number(maxCuotas) : 60,
+      permite_borrar_venta: permiteBorrarVenta !== undefined ? Boolean(permiteBorrarVenta) : true,
+      permite_modificar_pagos: permiteModificarPagos !== undefined ? Boolean(permiteModificarPagos) : true,
     };
 
     const { error: profileError } = await adminClient

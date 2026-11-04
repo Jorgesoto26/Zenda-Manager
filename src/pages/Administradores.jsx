@@ -24,7 +24,10 @@ import {
   updateAdministrador,
   toggleAdministradorEstado,
 } from '@/services/administradoresService';
-import { getOrganizaciones } from '@/services/organizacionesService';
+import {
+  getOrganizaciones,
+  assignAdminToOrganizacion,
+} from '@/services/organizacionesService';
 import { useSupport } from '@/context/SupportContext';
 import { formatCurrency } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -59,6 +62,12 @@ export default function Administradores() {
   const [editingAdmin, setEditingAdmin] = useState(null);
   const [editFormData, setEditFormData] = useState({});
   const [saving, setSaving] = useState(false);
+
+  // Modal Vincular a Organización
+  const [assignOrgModalOpen, setAssignOrgModalOpen] = useState(false);
+  const [selectedAdminForOrg, setSelectedAdminForOrg] = useState(null);
+  const [selectedTargetOrgId, setSelectedTargetOrgId] = useState('');
+  const [assigningOrg, setAssigningOrg] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -99,6 +108,10 @@ export default function Administradores() {
     e.preventDefault();
     if (!formData.email.trim() || !formData.password.trim() || !formData.nombre.trim()) {
       toast.error('Nombre, correo y contraseña son obligatorios');
+      return;
+    }
+    if (!formData.organizacionId) {
+      toast.error('Debe seleccionar una organización para el administrador');
       return;
     }
     if (formData.password.length < 6) {
@@ -165,6 +178,37 @@ export default function Administradores() {
     }
   };
 
+  const handleOpenAssignOrg = (admin) => {
+    setSelectedAdminForOrg(admin);
+    setSelectedTargetOrgId(selectedOrgId || '');
+    setAssignOrgModalOpen(true);
+  };
+
+  const handleConfirmAssignOrg = async (e) => {
+    e.preventDefault();
+    if (!selectedAdminForOrg || !selectedTargetOrgId) {
+      toast.error('Debe seleccionar una organización');
+      return;
+    }
+
+    setAssigningOrg(true);
+    try {
+      await assignAdminToOrganizacion({
+        organizacionId: selectedTargetOrgId,
+        adminId: selectedAdminForOrg.id,
+      });
+      toast.success(`Administrador ${selectedAdminForOrg.nombre} vinculado con éxito`);
+      setAssignOrgModalOpen(false);
+      setSelectedAdminForOrg(null);
+      setSelectedTargetOrgId('');
+      loadData();
+    } catch (err) {
+      toast.error('Error al vincular administrador', { description: err.message });
+    } finally {
+      setAssigningOrg(false);
+    }
+  };
+
   const handleToggleEstado = async (admin) => {
     const nuevoEstado = admin.activo === false;
     try {
@@ -191,7 +235,13 @@ export default function Administradores() {
           </p>
         </div>
         <Button
-          onClick={() => setCreateModalOpen(true)}
+          onClick={() => {
+            setFormData((prev) => ({
+              ...prev,
+              organizacionId: selectedOrgId || (organizaciones.length === 1 ? organizaciones[0].id : prev.organizacionId || ''),
+            }));
+            setCreateModalOpen(true);
+          }}
           className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
         >
           <Plus className="h-4 w-4" />
@@ -263,7 +313,19 @@ export default function Administradores() {
                           <span>{admin.organizacion.nombre}</span>
                         </div>
                       ) : (
-                        <span className="text-xs text-slate-400 italic">Sin asignar</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 font-medium">
+                            Sin organización
+                          </span>
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            className="text-[11px] h-6 px-2 bg-white text-blue-600 border-blue-200 hover:bg-blue-50 font-medium"
+                            onClick={() => handleOpenAssignOrg(admin)}
+                          >
+                            Vincular
+                          </Button>
+                        </div>
                       )}
                     </td>
 
@@ -403,9 +465,10 @@ export default function Administradores() {
 
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">
-              Organización Asignada
+              Organización Asignada <span className="text-red-500">*</span>
             </label>
             <select
+              required
               value={formData.organizacionId}
               onChange={(e) => setFormData({ ...formData, organizacionId: e.target.value })}
               className="w-full h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -550,6 +613,59 @@ export default function Administradores() {
             </Button>
             <Button type="submit" loading={saving}>
               Guardar Permisos
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal: Vincular a Organización */}
+      <Modal
+        isOpen={assignOrgModalOpen}
+        onClose={() => {
+          setAssignOrgModalOpen(false);
+          setSelectedAdminForOrg(null);
+          setSelectedTargetOrgId('');
+        }}
+        title="Vincular Administrador a Organización"
+        description={`Asigna una empresa u organización para ${selectedAdminForOrg?.nombre} ${selectedAdminForOrg?.apellido || ''}.`}
+      >
+        <form onSubmit={handleConfirmAssignOrg} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              Seleccionar Organización Destino *
+            </label>
+            <select
+              required
+              value={selectedTargetOrgId}
+              onChange={(e) => setSelectedTargetOrgId(e.target.value)}
+              className="w-full h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">-- Selecciona una organización --</option>
+              {organizaciones.map((org) => (
+                <option key={org.id} value={org.id}>
+                  {org.nombre} {org.estado === 'suspendida' ? '(Suspendida)' : ''}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-slate-500 mt-2">
+              El administrador será asociado como Administrador Principal de esta organización en la plataforma.
+            </p>
+          </div>
+
+          <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setAssignOrgModalOpen(false);
+                setSelectedAdminForOrg(null);
+                setSelectedTargetOrgId('');
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button type="submit" loading={assigningOrg}>
+              Vincular Organización
             </Button>
           </div>
         </form>

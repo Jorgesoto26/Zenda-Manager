@@ -26,8 +26,11 @@ import {
   getOrganizaciones,
   createOrganizacion,
   toggleOrganizacionEstado,
+  assignAdminToOrganizacion,
 } from '@/services/organizacionesService';
+import { getAdministradores } from '@/services/administradoresService';
 import { useSupport } from '@/context/SupportContext';
+import { useAuth } from '@/context/AuthContext';
 import { ESTADOS_ORGANIZACION, ESTADO_BADGES } from '@/lib/constants';
 import { formatDate } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -48,8 +51,16 @@ export default function Organizaciones() {
     direccion: '',
     emailContacto: '',
     modoApertura: 'admin_masivo',
+    adminId: '',
   });
   const [creating, setCreating] = useState(false);
+  const [availableAdmins, setAvailableAdmins] = useState([]);
+
+  // Modal Asignar Administrador
+  const [assignModalOpen, setAssignModalOpen] = useState(false);
+  const [selectedOrgForAssign, setSelectedOrgForAssign] = useState(null);
+  const [selectedAdminId, setSelectedAdminId] = useState('');
+  const [assigningAdmin, setAssigningAdmin] = useState(false);
 
   // Modal Cambiar Estado (Suspender/Activar)
   const [statusAlertOpen, setStatusAlertOpen] = useState(false);
@@ -58,12 +69,17 @@ export default function Organizaciones() {
   const [processingStatus, setProcessingStatus] = useState(false);
 
   const { setSelectedOrgId, selectedOrgId } = useSupport();
+  const { isSuperAdmin, rolSoporte } = useAuth();
 
   const loadOrgs = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getOrganizaciones();
-      setOrganizaciones(data);
+      const [data, admins] = await Promise.all([
+        getOrganizaciones(),
+        getAdministradores().catch(() => []),
+      ]);
+      setOrganizaciones(data || []);
+      setAvailableAdmins(admins || []);
     } catch (err) {
       toast.error('Error al cargar organizaciones', { description: err.message });
     } finally {
@@ -104,6 +120,13 @@ export default function Organizaciones() {
       return;
     }
 
+    if (!isSuperAdmin) {
+      toast.error('Permiso denegado', {
+        description: `Tu cuenta tiene rol "${rolSoporte || 'desconocido'}". La creación de organizaciones está reservada exclusivamente para Superadministradores de Soporte Central.`,
+      });
+      return;
+    }
+
     setCreating(true);
     try {
       await createOrganizacion(formData);
@@ -116,12 +139,44 @@ export default function Organizaciones() {
         direccion: '',
         emailContacto: '',
         modoApertura: 'admin_masivo',
+        adminId: '',
       });
       loadOrgs();
     } catch (err) {
       toast.error('Error al crear organización', { description: err.message });
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleOpenAssignAdmin = (org) => {
+    setSelectedOrgForAssign(org);
+    setSelectedAdminId(org.admin?.id || '');
+    setAssignModalOpen(true);
+  };
+
+  const handleConfirmAssignAdmin = async (e) => {
+    e.preventDefault();
+    if (!selectedOrgForAssign || !selectedAdminId) {
+      toast.error('Debe seleccionar un administrador');
+      return;
+    }
+
+    setAssigningAdmin(true);
+    try {
+      await assignAdminToOrganizacion({
+        organizacionId: selectedOrgForAssign.id,
+        adminId: selectedAdminId,
+      });
+      toast.success(`Administrador asignado a ${selectedOrgForAssign.nombre}`);
+      setAssignModalOpen(false);
+      setSelectedOrgForAssign(null);
+      setSelectedAdminId('');
+      loadOrgs();
+    } catch (err) {
+      toast.error('Error al asignar administrador', { description: err.message });
+    } finally {
+      setAssigningAdmin(false);
     }
   };
 
@@ -166,7 +221,9 @@ export default function Organizaciones() {
         </div>
         <Button
           onClick={() => setCreateModalOpen(true)}
-          className="gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+          disabled={!isSuperAdmin}
+          title={!isSuperAdmin ? `Solo Superadministradores pueden crear organizaciones (Rol actual: ${rolSoporte || 'técnico'})` : ''}
+          className="gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Plus className="h-4 w-4" />
           <span>Nueva Organización</span>
@@ -270,6 +327,16 @@ export default function Organizaciones() {
                             : 'Sin administrador asignado'}
                         </span>
                       </div>
+                      {isSuperAdmin && (
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          className="text-[11px] h-6 px-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 shrink-0 font-medium"
+                          onClick={() => handleOpenAssignAdmin(org)}
+                        >
+                          {org.admin ? 'Cambiar' : 'Asignar'}
+                        </Button>
+                      )}
                     </div>
 
                     {/* Datos de contacto */}
@@ -418,6 +485,27 @@ export default function Organizaciones() {
             </p>
           </div>
 
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              Administrador Principal (Opcional)
+            </label>
+            <select
+              value={formData.adminId || ''}
+              onChange={(e) => setFormData({ ...formData, adminId: e.target.value })}
+              className="w-full h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">-- Sin asignar (asignar después) --</option>
+              {availableAdmins.map((adm) => (
+                <option key={adm.id} value={adm.id}>
+                  {adm.nombre} {adm.apellido || ''} {!adm.organizacion_id ? '(🟢 Disponible / Sin organización)' : `(Asignado a: ${adm.organizacion?.nombre || 'otra org'})`}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Puedes seleccionar a un administrador existente en la plataforma para que lidere esta organización.
+            </p>
+          </div>
+
           <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
             <Button
               type="button"
@@ -428,6 +516,63 @@ export default function Organizaciones() {
             </Button>
             <Button type="submit" loading={creating}>
               Crear Organización
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal: Asignar Administrador Existente */}
+      <Modal
+        isOpen={assignModalOpen}
+        onClose={() => {
+          setAssignModalOpen(false);
+          setSelectedOrgForAssign(null);
+          setSelectedAdminId('');
+        }}
+        title="Asignar Administrador Principal"
+        description={`Vincula un administrador existente a la organización "${selectedOrgForAssign?.nombre}".`}
+      >
+        <form onSubmit={handleConfirmAssignAdmin} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              Seleccionar Administrador *
+            </label>
+            <select
+              required
+              value={selectedAdminId}
+              onChange={(e) => setSelectedAdminId(e.target.value)}
+              className="w-full h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">-- Selecciona un administrador existente --</option>
+              {availableAdmins.map((adm) => {
+                const isCurrent = adm.id === selectedOrgForAssign?.admin?.id;
+                const isFree = !adm.organizacion_id;
+                return (
+                  <option key={adm.id} value={adm.id}>
+                    {adm.nombre} {adm.apellido || ''} {isCurrent ? '(Actual)' : isFree ? '(🟢 Sin organización / Disponible)' : `(Asignado a: ${adm.organizacion?.nombre || 'otra org'})`}
+                  </option>
+                );
+              })}
+            </select>
+            <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+              Los administradores marcados con <strong className="text-emerald-700">🟢 Sin organización</strong> serán asociados de inmediato a esta empresa.
+            </p>
+          </div>
+
+          <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setAssignModalOpen(false);
+                setSelectedOrgForAssign(null);
+                setSelectedAdminId('');
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button type="submit" loading={assigningAdmin}>
+              Asignar Administrador
             </Button>
           </div>
         </form>

@@ -14,8 +14,10 @@ import Organizaciones from '@/pages/Organizaciones';
 import OrganizacionDetalle from '@/pages/OrganizacionDetalle';
 import Administradores from '@/pages/Administradores';
 import Usuarios from '@/pages/Usuarios';
+import ExploradorDatos from '@/pages/ExploradorDatos';
 import Parametrizacion from '@/pages/Parametrizacion';
 import Auditoria from '@/pages/Auditoria';
+import LogsSistema from '@/pages/LogsSistema';
 import SoporteTecnico from '@/pages/SoporteTecnico';
 
 export default function App() {
@@ -36,8 +38,10 @@ export default function App() {
                 <Route path="/organizaciones/:id" element={<OrganizacionDetalle />} />
                 <Route path="/administradores" element={<Administradores />} />
                 <Route path="/usuarios" element={<Usuarios />} />
+                <Route path="/explorador" element={<ExploradorDatos />} />
                 <Route path="/parametrizacion" element={<Parametrizacion />} />
                 <Route path="/auditoria" element={<Auditoria />} />
+                <Route path="/logs" element={<LogsSistema />} />
                 <Route path="/soporte" element={<SoporteTecnico />} />
               </Route>
             </Route>

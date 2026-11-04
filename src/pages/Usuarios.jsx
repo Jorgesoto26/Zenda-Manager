@@ -9,7 +9,13 @@ import {
   CheckCircle2,
   XCircle,
   Edit2,
-  TrendingUp,
+  Key,
+  Copy,
+  Check,
+  Eye,
+  EyeOff,
+  RefreshCw,
+  Info,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -17,24 +23,52 @@ import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { Switch } from '@/components/ui/Switch';
-import { getUsuarios, toggleUsuarioActivo, updateUsuarioPermisos } from '@/services/usuariosService';
+import {
+  getUsuarios,
+  toggleUsuarioActivo,
+  updateUsuario,
+  updateUsuarioPassword,
+} from '@/services/usuariosService';
 import { useSupport } from '@/context/SupportContext';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import { useAuth } from '@/context/AuthContext';
+import { formatCurrency } from '@/lib/utils';
 import { toast } from 'sonner';
 
 export default function Usuarios() {
   const { selectedOrgId } = useSupport();
+  const { isSuperAdmin } = useAuth();
   const [usuarios, setUsuarios] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [rolFilter, setRolFilter] = useState('todos');
   const [estadoFilter, setEstadoFilter] = useState('todos');
 
-  // Edit Permissions Modal
+  // Modal: Editar Usuario Integral
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
-  const [permisosForm, setPermisosForm] = useState({});
-  const [saving, setSaving] = useState(false);
+  const [editForm, setEditForm] = useState({
+    nombre: '',
+    apellido: '',
+    rol: 'vendedor',
+    superior_id: '',
+    modo_apertura_caja: 'admin_masivo',
+    dinero_max_caja: 0,
+    dinero_max_venta: 0,
+    dinero_max_gasto: 0,
+    max_cuotas: 30,
+    permite_borrar_venta: false,
+    permite_modificar_pagos: false,
+    motivo: '',
+  });
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  // Modal: Gestión de Contraseña
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  const [passwordUser, setPasswordUser] = useState(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [copiedPassword, setCopiedPassword] = useState(false);
+  const [savingPassword, setSavingPassword] = useState(false);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -71,34 +105,118 @@ export default function Usuarios() {
     }
   };
 
-  const handleEditClick = (user) => {
+  // Abrir Modal de Edición Completo
+  const handleOpenEdit = (user) => {
     setEditingUser(user);
-    setPermisosForm({
+    setEditForm({
+      nombre: user.nombre || '',
+      apellido: user.apellido || '',
+      rol: user.rol || 'vendedor',
+      superior_id: user.superior_id || '',
+      modo_apertura_caja: user.modo_apertura_caja || 'admin_masivo',
       dinero_max_caja: user.dinero_max_caja || 0,
       dinero_max_venta: user.dinero_max_venta || 0,
       dinero_max_gasto: user.dinero_max_gasto || 0,
       max_cuotas: user.max_cuotas || 30,
       permite_borrar_venta: !!user.permite_borrar_venta,
       permite_modificar_pagos: !!user.permite_modificar_pagos,
+      motivo: '',
     });
     setEditModalOpen(true);
   };
 
-  const handleSavePermisos = async (e) => {
+  const handleSaveEdit = async (e) => {
     e.preventDefault();
     if (!editingUser) return;
-    setSaving(true);
+    if (!editForm.nombre.trim()) {
+      toast.error('El nombre es obligatorio');
+      return;
+    }
+
+    setSavingEdit(true);
     try {
-      await updateUsuarioPermisos(editingUser.id, permisosForm);
-      toast.success('Permisos actualizados');
+      await updateUsuario(editingUser.id, {
+        nombre: editForm.nombre.trim(),
+        apellido: editForm.apellido.trim(),
+        rol: editForm.rol,
+        superior_id: editForm.superior_id || null,
+        modo_apertura_caja: editForm.modo_apertura_caja,
+        dinero_max_caja: Number(editForm.dinero_max_caja) || 0,
+        dinero_max_venta: Number(editForm.dinero_max_venta) || 0,
+        dinero_max_gasto: Number(editForm.dinero_max_gasto) || 0,
+        max_cuotas: Number(editForm.max_cuotas) || 30,
+        permite_borrar_venta: Boolean(editForm.permite_borrar_venta),
+        permite_modificar_pagos: Boolean(editForm.permite_modificar_pagos),
+        motivo: editForm.motivo.trim() || 'Modificación de perfil y permisos desde Zenda Manager',
+      });
+      toast.success('Usuario actualizado con éxito');
       setEditModalOpen(false);
       loadData();
     } catch (err) {
-      toast.error('Error al actualizar permisos', { description: err.message });
+      toast.error('Error al actualizar usuario', { description: err.message });
     } finally {
-      setSaving(false);
+      setSavingEdit(false);
     }
   };
+
+  // Abrir Modal de Contraseña
+  const handleOpenPasswordModal = (user) => {
+    setPasswordUser(user);
+    setNewPassword('');
+    setShowPassword(false);
+    setCopiedPassword(false);
+    setPasswordModalOpen(true);
+  };
+
+  const generateRandomPassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';
+    let res = 'Zenda*';
+    for (let i = 0; i < 4; i++) {
+      res += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setNewPassword(res);
+    setShowPassword(true);
+  };
+
+  const handleCopyPassword = () => {
+    if (!newPassword) return;
+    navigator.clipboard.writeText(newPassword);
+    setCopiedPassword(true);
+    toast.success('Contraseña copiada al portapapeles');
+    setTimeout(() => setCopiedPassword(false), 2000);
+  };
+
+  const handleSavePassword = async (e) => {
+    e.preventDefault();
+    if (!passwordUser) return;
+    if (!newPassword || newPassword.length < 6) {
+      toast.error('La contraseña debe tener al menos 6 caracteres');
+      return;
+    }
+
+    setSavingPassword(true);
+    try {
+      await updateUsuarioPassword({
+        userId: passwordUser.id,
+        newPassword,
+        motivo: `Restablecimiento de contraseña para ${passwordUser.nombre} ${passwordUser.apellido || ''}`.trim(),
+      });
+      toast.success('Contraseña actualizada con éxito');
+      setPasswordModalOpen(false);
+    } catch (err) {
+      toast.error('Error al cambiar contraseña', { description: err.message });
+    } finally {
+      setSavingPassword(false);
+    }
+  };
+
+  // Lista de posibles superiores en la misma organización para el dropdown
+  const posiblesSuperiores = usuarios.filter(
+    (u) =>
+      u.id !== editingUser?.id &&
+      (u.rol === 'admin' || u.rol === 'supervisor') &&
+      (!editingUser?.organizacion_id || u.organizacion_id === editingUser?.organizacion_id)
+  );
 
   return (
     <div className="space-y-6">
@@ -106,7 +224,7 @@ export default function Usuarios() {
       <div>
         <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Directorio de Usuarios</h1>
         <p className="text-sm text-slate-500 mt-1">
-          Consulta global de perfiles, relaciones jerárquicas y permisos de operación en Zenda
+          Consulta de perfiles, edición de información, límites operativos y restablecimiento seguro de contraseñas
         </p>
       </div>
 
@@ -116,7 +234,7 @@ export default function Usuarios() {
           <div className="relative flex-1 w-full">
             <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
             <Input
-              placeholder="Buscar por nombre, apellido, correo electrónico..."
+              placeholder="Buscar por nombre o apellido..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9 bg-slate-50 border-slate-200"
@@ -132,6 +250,8 @@ export default function Usuarios() {
               <option value="todos">Todos los roles</option>
               <option value="admin">Administradores</option>
               <option value="vendedor">Vendedores</option>
+              <option value="supervisor">Supervisores</option>
+              <option value="cobrador">Cobradores</option>
               <option value="cliente">Clientes</option>
             </select>
 
@@ -141,8 +261,8 @@ export default function Usuarios() {
               className="h-9 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="todos">Todos los estados</option>
-              <option value="activos">Habilitados</option>
-              <option value="inactivos">Inhabilitados</option>
+              <option value="activos">Solo activos</option>
+              <option value="inactivos">Solo inhabilitados</option>
             </select>
           </div>
         </CardContent>
@@ -152,20 +272,27 @@ export default function Usuarios() {
       <Card>
         <CardContent className="p-0 overflow-x-auto">
           {loading ? (
-            <div className="py-16 text-center text-sm text-slate-400">Cargando directorio...</div>
+            <div className="p-12 text-center text-slate-400">
+              <div className="h-6 w-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+              <span>Cargando usuarios...</span>
+            </div>
           ) : usuarios.length === 0 ? (
-            <div className="py-16 text-center text-sm text-slate-400">
-              No se encontraron usuarios para los criterios seleccionados.
+            <div className="p-12 text-center text-slate-400">
+              <Users className="h-10 w-10 mx-auto mb-3 opacity-30" />
+              <p className="font-medium text-slate-600">No se encontraron usuarios</p>
+              <p className="text-xs text-slate-400 mt-1">
+                Ajusta los filtros o comprueba la organización seleccionada
+              </p>
             </div>
           ) : (
-            <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50 border-b border-slate-200/80 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                <tr>
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-100 bg-slate-50/50 text-[11px] font-bold uppercase tracking-wider text-slate-500">
                   <th className="px-6 py-3.5">Usuario</th>
                   <th className="px-6 py-3.5">Rol</th>
                   <th className="px-6 py-3.5">Organización</th>
-                  <th className="px-6 py-3.5">Superior Directo</th>
-                  <th className="px-6 py-3.5">Límites / Permisos</th>
+                  <th className="px-6 py-3.5">Líder / Superior</th>
+                  <th className="px-6 py-3.5">Límites Clave</th>
                   <th className="px-6 py-3.5">Estado</th>
                   <th className="px-6 py-3.5 text-right">Acciones</th>
                 </tr>
@@ -174,25 +301,19 @@ export default function Usuarios() {
                 {usuarios.map((u) => {
                   const isActivo = u.activo !== false;
                   return (
-                    <tr key={u.id} className="hover:bg-slate-50/80 transition-colors">
+                    <tr key={u.id} className="hover:bg-slate-50/60 transition-colors">
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
-                          <div
-                            className={`h-9 w-9 rounded-full flex items-center justify-center font-bold text-xs uppercase shrink-0 ${
-                              u.rol === 'admin'
-                                ? 'bg-indigo-100 text-indigo-700'
-                                : u.rol === 'vendedor'
-                                ? 'bg-emerald-100 text-emerald-700'
-                                : 'bg-slate-100 text-slate-700'
-                            }`}
-                          >
-                            {u.nombre?.[0] || 'U'}
+                          <div className="h-9 w-9 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center font-bold text-slate-600 text-xs">
+                            {u.nombre?.charAt(0) || 'U'}
                           </div>
                           <div>
-                            <p className="font-semibold text-slate-900">
+                            <div className="font-semibold text-slate-900 text-sm">
                               {u.nombre} {u.apellido || ''}
-                            </p>
-                            <p className="text-xs text-slate-500">{u.email}</p>
+                            </div>
+                            <div className="text-[11px] text-slate-400 font-mono">
+                              ID: {u.id.substring(0, 8)}...
+                            </div>
                           </div>
                         </div>
                       </td>
@@ -204,6 +325,8 @@ export default function Usuarios() {
                               ? 'default'
                               : u.rol === 'vendedor'
                               ? 'success'
+                              : u.rol === 'supervisor'
+                              ? 'warning'
                               : 'secondary'
                           }
                           className="capitalize text-xs font-semibold"
@@ -254,31 +377,48 @@ export default function Usuarios() {
                         </Badge>
                       </td>
 
-                      <td className="px-6 py-4 text-right space-x-2">
-                        {u.rol !== 'cliente' && (
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {/* Botón Editar Usuario */}
                           <Button
                             size="sm"
                             variant="outline"
-                            className="h-8 text-xs bg-white"
-                            onClick={() => handleEditClick(u)}
+                            className="h-8 text-xs bg-white text-slate-700 hover:text-blue-600 hover:bg-blue-50"
+                            onClick={() => handleOpenEdit(u)}
+                            title="Editar información y permisos del usuario"
                           >
-                            <Edit2 className="h-3.5 w-3.5 mr-1" />
-                            <span>Límites</span>
+                            <Edit2 className="h-3.5 w-3.5 mr-1 text-slate-500" />
+                            <span>Editar</span>
                           </Button>
-                        )}
 
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className={`h-8 text-xs ${
-                            isActivo
-                              ? 'text-red-600 hover:text-red-700 hover:bg-red-50'
-                              : 'text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50'
-                          }`}
-                          onClick={() => handleToggleActivo(u)}
-                        >
-                          {isActivo ? 'Inhabilitar' : 'Habilitar'}
-                        </Button>
+                          {/* Botón Gestionar Contraseña */}
+                          {isSuperAdmin && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 text-xs bg-white text-slate-700 hover:text-amber-600 hover:bg-amber-50"
+                              onClick={() => handleOpenPasswordModal(u)}
+                              title="Restablecer o asignar nueva contraseña"
+                            >
+                              <Key className="h-3.5 w-3.5 mr-1 text-amber-500" />
+                              <span>Clave</span>
+                            </Button>
+                          )}
+
+                          {/* Botón Inhabilitar/Habilitar */}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className={`h-8 text-xs ${
+                              isActivo
+                                ? 'text-red-600 hover:text-red-700 hover:bg-red-50'
+                                : 'text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50'
+                            }`}
+                            onClick={() => handleToggleActivo(u)}
+                          >
+                            {isActivo ? 'Inhabilitar' : 'Habilitar'}
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -289,110 +429,262 @@ export default function Usuarios() {
         </CardContent>
       </Card>
 
-      {/* Modal: Ajustar Límites y Permisos */}
+      {/* Modal 1: Editar Usuario Completo */}
       <Modal
         isOpen={editModalOpen}
         onClose={() => setEditModalOpen(false)}
-        title="Límites de Operación y Permisos"
-        description={`Ajustes de control para ${editingUser?.nombre} (${editingUser?.rol})`}
+        title="Editar Usuario"
+        description={`Modifica datos personales, rol operativo y límites para ${editingUser?.nombre} ${editingUser?.apellido || ''}`}
       >
-        <form onSubmit={handleSavePermisos} className="space-y-4">
-          <div className="grid grid-cols-3 gap-3">
+        <form onSubmit={handleSaveEdit} className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-semibold text-slate-700 block mb-1">Máx Caja</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Nombre *</label>
               <Input
-                type="number"
-                value={permisosForm.dinero_max_caja || 0}
-                onChange={(e) =>
-                  setPermisosForm({
-                    ...permisosForm,
-                    dinero_max_caja: parseFloat(e.target.value) || 0,
-                  })
-                }
+                required
+                value={editForm.nombre}
+                onChange={(e) => setEditForm({ ...editForm, nombre: e.target.value })}
+                placeholder="Nombre"
               />
             </div>
             <div>
-              <label className="text-xs font-semibold text-slate-700 block mb-1">Máx Venta</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Apellido</label>
               <Input
-                type="number"
-                value={permisosForm.dinero_max_venta || 0}
-                onChange={(e) =>
-                  setPermisosForm({
-                    ...permisosForm,
-                    dinero_max_venta: parseFloat(e.target.value) || 0,
-                  })
-                }
+                value={editForm.apellido}
+                onChange={(e) => setEditForm({ ...editForm, apellido: e.target.value })}
+                placeholder="Apellido"
               />
             </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-semibold text-slate-700 block mb-1">Máx Gasto</label>
-              <Input
-                type="number"
-                value={permisosForm.dinero_max_gasto || 0}
-                onChange={(e) =>
-                  setPermisosForm({
-                    ...permisosForm,
-                    dinero_max_gasto: parseFloat(e.target.value) || 0,
-                  })
-                }
-              />
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Rol Operativo</label>
+              <select
+                value={editForm.rol}
+                onChange={(e) => setEditForm({ ...editForm, rol: e.target.value })}
+                className="w-full h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="vendedor">Vendedor</option>
+                <option value="supervisor">Supervisor</option>
+                <option value="cobrador">Cobrador</option>
+                <option value="admin">Administrador</option>
+                <option value="cliente">Cliente</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Superior Jerárquico</label>
+              <select
+                value={editForm.superior_id}
+                onChange={(e) => setEditForm({ ...editForm, superior_id: e.target.value })}
+                className="w-full h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Sin superior (Raíz)</option>
+                {posiblesSuperiores.map((sup) => (
+                  <option key={sup.id} value={sup.id}>
+                    {sup.nombre} {sup.apellido || ''} ({sup.rol})
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
           <div>
-            <label className="text-xs font-semibold text-slate-700 block mb-1">
-              Máximo de Cuotas Permitidas
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              Modo de Apertura de Caja
             </label>
-            <Input
-              type="number"
-              value={permisosForm.max_cuotas || 30}
-              onChange={(e) =>
-                setPermisosForm({
-                  ...permisosForm,
-                  max_cuotas: parseInt(e.target.value, 10) || 30,
-                })
-              }
-            />
+            <select
+              value={editForm.modo_apertura_caja}
+              onChange={(e) => setEditForm({ ...editForm, modo_apertura_caja: e.target.value })}
+              className="w-full h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="admin_masivo">Apertura Masiva por Administrador</option>
+              <option value="vendedor_dia">Auto-apertura Diaria por Vendedor</option>
+            </select>
           </div>
 
-          <div className="border-t border-slate-100 pt-3 space-y-3">
-            <div className="flex items-center justify-between">
+          <div className="border-t border-slate-100 pt-3">
+            <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-2">
+              Límites Financieros
+            </h4>
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <p className="text-xs font-semibold text-slate-800">Permitir Anular Ventas</p>
-                <p className="text-[11px] text-slate-500">
-                  Permite anular ventas en la app móvil si no tienen abonos.
-                </p>
+                <label className="text-[11px] text-slate-500 block mb-1">Dinero Máx en Caja</label>
+                <Input
+                  type="number"
+                  value={editForm.dinero_max_caja}
+                  onChange={(e) => setEditForm({ ...editForm, dinero_max_caja: e.target.value })}
+                />
               </div>
-              <Switch
-                checked={!!permisosForm.permite_borrar_venta}
-                onChange={(val) =>
-                  setPermisosForm({ ...permisosForm, permite_borrar_venta: val })
-                }
-              />
+              <div>
+                <label className="text-[11px] text-slate-500 block mb-1">Dinero Máx Venta/Préstamo</label>
+                <Input
+                  type="number"
+                  value={editForm.dinero_max_venta}
+                  onChange={(e) => setEditForm({ ...editForm, dinero_max_venta: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-500 block mb-1">Dinero Máx Gasto</label>
+                <Input
+                  type="number"
+                  value={editForm.dinero_max_gasto}
+                  onChange={(e) => setEditForm({ ...editForm, dinero_max_gasto: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-500 block mb-1">Máx Cuotas Permitidas</label>
+                <Input
+                  type="number"
+                  value={editForm.max_cuotas}
+                  onChange={(e) => setEditForm({ ...editForm, max_cuotas: e.target.value })}
+                />
+              </div>
             </div>
+          </div>
 
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold text-slate-800">Permitir Modificar Pagos</p>
-                <p className="text-[11px] text-slate-500">
-                  Permite ajustar valor de pagos en turnos abiertos.
-                </p>
+          <div className="border-t border-slate-100 pt-3">
+            <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-2">
+              Permisos Operativos Especiales
+            </h4>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-100">
+                <div>
+                  <span className="text-xs font-semibold text-slate-800 block">Permite Borrar Ventas</span>
+                  <span className="text-[11px] text-slate-500">Autorización para anular facturas registradas</span>
+                </div>
+                <Switch
+                  checked={editForm.permite_borrar_venta}
+                  onCheckedChange={(val) => setEditForm({ ...editForm, permite_borrar_venta: val })}
+                />
               </div>
-              <Switch
-                checked={!!permisosForm.permite_modificar_pagos}
-                onChange={(val) =>
-                  setPermisosForm({ ...permisosForm, permite_modificar_pagos: val })
-                }
-              />
+
+              <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-100">
+                <div>
+                  <span className="text-xs font-semibold text-slate-800 block">Permite Modificar Pagos</span>
+                  <span className="text-[11px] text-slate-500">Autorización para rectificar abonos y comprobantes</span>
+                </div>
+                <Switch
+                  checked={editForm.permite_modificar_pagos}
+                  onCheckedChange={(val) => setEditForm({ ...editForm, permite_modificar_pagos: val })}
+                />
+              </div>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              Motivo del Cambio (Auditoría)
+            </label>
+            <Input
+              value={editForm.motivo}
+              onChange={(e) => setEditForm({ ...editForm, motivo: e.target.value })}
+              placeholder="Ej: Ajuste de límites por ascenso o nueva política"
+            />
           </div>
 
           <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
             <Button type="button" variant="outline" onClick={() => setEditModalOpen(false)}>
               Cancelar
             </Button>
-            <Button type="submit" loading={saving}>
-              Guardar Permisos
+            <Button type="submit" loading={savingEdit} className="bg-blue-600 hover:bg-blue-700 text-white">
+              Guardar Cambios
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal 2: Gestión de Contraseña y Recuperación Segura */}
+      <Modal
+        isOpen={passwordModalOpen}
+        onClose={() => setPasswordModalOpen(false)}
+        title="Gestionar Contraseña de Usuario"
+        description={`Restablece o genera una nueva credencial para ${passwordUser?.nombre} ${passwordUser?.apellido || ''}`}
+      >
+        <form onSubmit={handleSavePassword} className="space-y-4">
+          {/* Banner explicativo de seguridad criptográfica */}
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex gap-3 text-amber-900 text-xs">
+            <Info className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold mb-1">¿Por qué no es posible "ver" la contraseña anterior?</p>
+              <p className="text-amber-800 leading-relaxed">
+                Por estrictas directrices de seguridad de <strong>Supabase Auth (GoTrue)</strong> y el estándar de la industria, las contraseñas se almacenan mediante <strong>hashes criptográficos irreversibles (bcrypt)</strong>. Nadie (ni la base de datos ni los administradores) puede desencriptar la contraseña existente.
+              </p>
+              <p className="text-amber-800 font-medium mt-1.5">
+                Para solucionar de inmediato el olvido del usuario, genera o ingresa una contraseña temporal a continuación y cópiala con un clic para enviársela.
+              </p>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              Nueva Contraseña para el Usuario *
+            </label>
+            <div className="relative">
+              <Input
+                type={showPassword ? 'text' : 'password'}
+                required
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Mínimo 6 caracteres"
+                className="pr-20 font-mono text-sm"
+              />
+              <div className="absolute right-1.5 top-1.5 flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                  title={showPassword ? 'Ocultar' : 'Mostrar'}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+                {newPassword && (
+                  <button
+                    type="button"
+                    onClick={handleCopyPassword}
+                    className="p-1 rounded text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                    title="Copiar contraseña"
+                  >
+                    {copiedPassword ? (
+                      <Check className="h-4 w-4 text-emerald-600" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={generateRandomPassword}
+              className="text-xs gap-1.5 bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              <span>Generar contraseña temporal segura</span>
+            </Button>
+            {newPassword && (
+              <span className="text-[11px] text-emerald-600 font-medium">
+                {copiedPassword ? '¡Copiada!' : 'Lista para copiar'}
+              </span>
+            )}
+          </div>
+
+          <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
+            <Button type="button" variant="outline" onClick={() => setPasswordModalOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              loading={savingPassword}
+              className="bg-amber-600 hover:bg-amber-700 text-white font-medium shadow-sm"
+            >
+              Establecer Nueva Contraseña
             </Button>
           </div>
         </form>
@@ -400,4 +692,3 @@ export default function Usuarios() {
     </div>
   );
 }
-

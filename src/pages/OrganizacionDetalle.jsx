@@ -24,10 +24,13 @@ import { Input } from '@/components/ui/Input';
 import {
   getOrganizacionById,
   updateOrganizacion,
+  assignAdminToOrganizacion,
 } from '@/services/organizacionesService';
+import { getAdministradores } from '@/services/administradoresService';
 import { getUsuarios } from '@/services/usuariosService';
 import { getAuditoriaLogs } from '@/services/auditoriaService';
 import { useSupport } from '@/context/SupportContext';
+import { useAuth } from '@/context/AuthContext';
 import { ESTADO_BADGES } from '@/lib/constants';
 import { formatDate, formatDateTime } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -35,12 +38,19 @@ import { toast } from 'sonner';
 export default function OrganizacionDetalle() {
   const { id } = useParams();
   const { setSelectedOrgId, selectedOrgId } = useSupport();
+  const { isSuperAdmin } = useAuth();
 
   const [org, setOrg] = useState(null);
   const [usuarios, setUsuarios] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('general'); // 'general' | 'equipo' | 'auditoria'
+  const [availableAdmins, setAvailableAdmins] = useState([]);
+
+  // Modal Asignar Administrador
+  const [assignModalOpen, setAssignModalOpen] = useState(false);
+  const [selectedAdminId, setSelectedAdminId] = useState('');
+  const [assigningAdmin, setAssigningAdmin] = useState(false);
 
   // Edit Modal
   const [editModalOpen, setEditModalOpen] = useState(false);
@@ -50,14 +60,16 @@ export default function OrganizacionDetalle() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [orgData, usersData, logsData] = await Promise.all([
+      const [orgData, usersData, logsData, adminsData] = await Promise.all([
         getOrganizacionById(id),
         getUsuarios({ organizacionId: id }),
         getAuditoriaLogs({ organizacionId: id, limit: 20 }),
+        getAdministradores().catch(() => []),
       ]);
       setOrg(orgData);
-      setUsuarios(usersData);
-      setAuditLogs(logsData);
+      setUsuarios(usersData || []);
+      setAuditLogs(logsData || []);
+      setAvailableAdmins(adminsData || []);
 
       if (orgData) {
         setEditData({
@@ -67,6 +79,7 @@ export default function OrganizacionDetalle() {
           direccion: orgData.direccion || '',
           email_contacto: orgData.email_contacto || '',
           modo_apertura_caja: orgData.modo_apertura_caja || 'admin_masivo',
+          admin_id: orgData.admin_id || '',
         });
       }
     } catch (err) {
@@ -75,6 +88,29 @@ export default function OrganizacionDetalle() {
       setLoading(false);
     }
   }, [id]);
+
+  const handleConfirmAssignAdmin = async (e) => {
+    e.preventDefault();
+    if (!selectedAdminId) {
+      toast.error('Debe seleccionar un administrador');
+      return;
+    }
+
+    setAssigningAdmin(true);
+    try {
+      await assignAdminToOrganizacion({
+        organizacionId: id,
+        adminId: selectedAdminId,
+      });
+      toast.success('Administrador asignado correctamente');
+      setAssignModalOpen(false);
+      loadData();
+    } catch (err) {
+      toast.error('Error al asignar administrador', { description: err.message });
+    } finally {
+      setAssigningAdmin(false);
+    }
+  };
 
   useEffect(() => {
     loadData();
@@ -291,10 +327,42 @@ export default function OrganizacionDetalle() {
                     {org.admin.telefono || 'No registrado'}
                   </p>
                 </div>
+
+                {isSuperAdmin && (
+                  <div className="pt-2 border-t border-slate-100 flex justify-end">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs h-8 gap-1.5 text-slate-700 bg-white hover:bg-slate-50"
+                      onClick={() => {
+                        setSelectedAdminId(org.admin?.id || '');
+                        setAssignModalOpen(true);
+                      }}
+                    >
+                      <Edit2 className="h-3 w-3 text-slate-500" />
+                      <span>Reasignar Administrador</span>
+                    </Button>
+                  </div>
+                )}
               </div>
             ) : (
-              <div className="text-center py-6 text-xs text-slate-400">
-                Esta organización no tiene un administrador principal asignado.
+              <div className="text-center py-6 space-y-3">
+                <p className="text-xs text-slate-400">
+                  Esta organización no tiene un administrador principal asignado.
+                </p>
+                {isSuperAdmin && (
+                  <Button
+                    size="sm"
+                    className="gap-1.5 text-xs bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+                    onClick={() => {
+                      setSelectedAdminId('');
+                      setAssignModalOpen(true);
+                    }}
+                  >
+                    <Shield className="h-3.5 w-3.5" />
+                    <span>Asignar Administrador Existente</span>
+                  </Button>
+                )}
               </div>
             )}
           </Card>
@@ -472,6 +540,31 @@ export default function OrganizacionDetalle() {
             </select>
           </div>
 
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              Administrador Principal
+            </label>
+            <select
+              value={editData.admin_id || ''}
+              onChange={(e) => setEditData({ ...editData, admin_id: e.target.value || null })}
+              className="w-full h-9 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">-- Sin administrador asignado --</option>
+              {availableAdmins.map((adm) => {
+                const isCurrent = adm.id === org?.admin_id;
+                const isFree = !adm.organizacion_id;
+                return (
+                  <option key={adm.id} value={adm.id}>
+                    {adm.nombre} {adm.apellido || ''} {isCurrent ? '(Actual)' : isFree ? '(🟢 Sin organización / Disponible)' : `(Asignado a: ${adm.organizacion?.nombre || 'otra org'})`}
+                  </option>
+                );
+              })}
+            </select>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Permite asociar a un administrador existente en la plataforma.
+            </p>
+          </div>
+
           <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
             <Button
               type="button"
@@ -482,6 +575,61 @@ export default function OrganizacionDetalle() {
             </Button>
             <Button type="submit" loading={saving}>
               Guardar Cambios
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal: Asignar / Cambiar Administrador */}
+      <Modal
+        isOpen={assignModalOpen}
+        onClose={() => {
+          setAssignModalOpen(false);
+          setSelectedAdminId('');
+        }}
+        title="Asignar Administrador Principal"
+        description={`Selecciona un administrador existente para vincularlo a la organización "${org?.nombre}".`}
+      >
+        <form onSubmit={handleConfirmAssignAdmin} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              Seleccionar Administrador *
+            </label>
+            <select
+              required
+              value={selectedAdminId}
+              onChange={(e) => setSelectedAdminId(e.target.value)}
+              className="w-full h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">-- Selecciona un administrador existente --</option>
+              {availableAdmins.map((adm) => {
+                const isCurrent = adm.id === org?.admin_id;
+                const isFree = !adm.organizacion_id;
+                return (
+                  <option key={adm.id} value={adm.id}>
+                    {adm.nombre} {adm.apellido || ''} {isCurrent ? '(Actual)' : isFree ? '(🟢 Sin organización / Disponible)' : `(Asignado a: ${adm.organizacion?.nombre || 'otra org'})`}
+                  </option>
+                );
+              })}
+            </select>
+            <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+              Los administradores marcados con <strong className="text-emerald-700">🟢 Sin organización</strong> serán vinculados de inmediato a esta empresa.
+            </p>
+          </div>
+
+          <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setAssignModalOpen(false);
+                setSelectedAdminId('');
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button type="submit" loading={assigningAdmin}>
+              Confirmar Asignación
             </Button>
           </div>
         </form>

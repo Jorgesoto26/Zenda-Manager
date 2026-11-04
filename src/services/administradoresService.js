@@ -61,6 +61,12 @@ export async function createAdministrador({
   organizacionId,
   telefono = null,
   motivo = 'Creación de nuevo administrador de organización desde Zenda Manager',
+  dineroMaxCaja,
+  dineroMaxVenta,
+  dineroMaxGasto,
+  maxCuotas,
+  permiteBorrarVenta,
+  permiteModificarPagos,
 }) {
   try {
     // La creación de administradores se realiza EXCLUSIVAMENTE mediante la Supabase Edge Function oficial
@@ -75,6 +81,12 @@ export async function createAdministrador({
         organizacionId,
         telefono,
         motivo,
+        dineroMaxCaja,
+        dineroMaxVenta,
+        dineroMaxGasto,
+        maxCuotas,
+        permiteBorrarVenta,
+        permiteModificarPagos,
       },
     });
 
@@ -95,7 +107,30 @@ export async function createAdministrador({
       }
 
       // Errores de validación o permisos devueltos por la Edge Function
-      const errorMsg = edgeData?.error || edgeError.message || 'Error en el servicio de creación de administradores';
+      let errorMsg = edgeData?.error;
+      if (!errorMsg && edgeError.context) {
+        try {
+          if (typeof edgeError.context.text === 'function') {
+            const rawText = await edgeError.context.text();
+            try {
+              const parsed = JSON.parse(rawText);
+              errorMsg = parsed?.error || parsed?.message;
+            } catch {
+              if (rawText && rawText.length < 500) {
+                errorMsg = rawText;
+              }
+            }
+          } else if (typeof edgeError.context.json === 'function') {
+            const parsed = await edgeError.context.json();
+            errorMsg = parsed?.error || parsed?.message;
+          }
+        } catch (ctxErr) {
+          console.warn('No se pudo extraer cuerpo del error de Edge Function:', ctxErr);
+        }
+      }
+      if (!errorMsg) {
+        errorMsg = edgeError.message || 'Error en el servicio de creación de administradores';
+      }
       throw new Error(errorMsg, { cause: edgeError });
     }
 

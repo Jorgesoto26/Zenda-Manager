@@ -31,7 +31,7 @@ export async function getUsuarios({
   }
   if (search.trim()) {
     query = query.or(
-      `nombre.ilike.%${search}%,apellido.ilike.%${search}%,email.ilike.%${search}%`
+      `nombre.ilike.%${search}%,apellido.ilike.%${search}%`
     );
   }
 
@@ -56,17 +56,23 @@ export async function getUsuarios({
   return data || [];
 }
 
-export async function updateUsuarioPermisos(id, permisos) {
+export async function updateUsuario(id, updates) {
   const { data: previa } = await supabase.from('profiles').select('*').eq('id', id).single();
+
+  const payload = {
+    ...updates,
+    updated_at: new Date().toISOString(),
+  };
 
   const { data, error } = await supabase
     .from('profiles')
-    .update({
-      ...permisos,
-      updated_at: new Date().toISOString(),
-    })
+    .update(payload)
     .eq('id', id)
-    .select()
+    .select(`
+      *,
+      organizacion:organizaciones(id, nombre, nit, estado),
+      superior:profiles!profiles_superior_id_fkey(id, nombre, apellido, rol)
+    `)
     .single();
 
   if (error) throw error;
@@ -74,14 +80,59 @@ export async function updateUsuarioPermisos(id, permisos) {
   await logAuditAction({
     organizacionId: data.organizacion_id,
     modulo: 'usuarios',
-    accion: 'modificar_permisos',
+    accion: 'editar_usuario',
     registroId: id,
     datosPrevios: previa,
     datosPosteriores: data,
-    motivo: 'Modificación de límites y permisos operativos desde Soporte Central',
+    motivo: updates.motivo || 'Modificación integral de usuario desde Zenda Manager',
   });
 
   return data;
+}
+
+export async function updateUsuarioPermisos(id, permisos) {
+  return updateUsuario(id, permisos);
+}
+
+export async function updateUsuarioPassword({ userId, newPassword, motivo }) {
+  try {
+    const { data: edgeData, error: edgeError } = await supabase.functions.invoke('manager-update-password', {
+      body: {
+        userId,
+        newPassword,
+        motivo: motivo || 'Actualización administrativa de contraseña desde Zenda Manager',
+      },
+    });
+
+    if (edgeError) {
+      let errorMsg = edgeData?.error;
+      if (!errorMsg && edgeError.context) {
+        try {
+          if (typeof edgeError.context.text === 'function') {
+            const rawText = await edgeError.context.text();
+            try {
+              const parsed = JSON.parse(rawText);
+              errorMsg = parsed?.error || parsed?.message;
+            } catch {
+              if (rawText && rawText.length < 500) errorMsg = rawText;
+            }
+          }
+        } catch {}
+      }
+      if (!errorMsg) {
+        errorMsg = edgeError.message || 'Error al actualizar la contraseña del usuario';
+      }
+      throw new Error(errorMsg, { cause: edgeError });
+    }
+
+    if (!edgeData?.success) {
+      throw new Error(edgeData?.error || 'No se pudo actualizar la contraseña');
+    }
+
+    return edgeData;
+  } catch (err) {
+    throw new Error(err.message || 'Error al cambiar contraseña del usuario', { cause: err });
+  }
 }
 
 export async function toggleUsuarioActivo(id, nuevoEstado) {
